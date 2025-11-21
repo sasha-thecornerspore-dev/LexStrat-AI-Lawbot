@@ -1,0 +1,7 @@
+{
+  "name": "Copy of LexStrat: Foreclosure Defense Intelligence",
+  "description": "An elite legal strategic intelligence tool for Pro Se foreclosure defense, utilizing Gemini to generate aggressive, fact-based legal motions and strategies.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
