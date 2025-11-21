@@ -175,44 +175,76 @@ export const generateExhibitImage = async (
 
 export const editEvidenceImage = async (imageBase64: string, prompt: string): Promise<string> => {
   const ai = getAiClient();
-  // Clean base64 string if needed
-  const cleanBase64 = imageBase64.replace(/^data:image\/\w+;base64,/, "");
   
+  // 1. Extract clean base64 and basic MIME type check
+  const matches = imageBase64.match(/^data:(image\/[a-zA-Z+]+);base64,(.+)$/);
+  
+  let mimeType = 'image/png'; // Default
+  let cleanBase64 = imageBase64.replace(/^data:image\/\w+;base64,/, "");
+
+  if (matches && matches.length === 3) {
+      mimeType = matches[1];
+      cleanBase64 = matches[2];
+  }
+
   try {
-    // Using Gemini 2.5 Flash Image for editing
+    // Gemini 2.5 Flash Image for editing
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash-image',
       contents: {
         parts: [
+          { text: "Edit this image: " + prompt }, 
           {
             inlineData: {
-              mimeType: 'image/png',
+              mimeType: mimeType, 
               data: cleanBase64
             }
-          },
-          { text: prompt }
+          }
         ]
       }
     });
 
+    // Check for Image Response
     for (const part of response.candidates?.[0]?.content?.parts || []) {
       if (part.inlineData) {
         return `data:image/png;base64,${part.inlineData.data}`;
       }
     }
-    throw new Error("No edited image returned");
+
+    // Fallback: Check if the model returned text explaining why it couldn't edit
+    const textResponse = response.text;
+    if (textResponse) {
+        throw new Error(`Model refused edit: ${textResponse}`);
+    }
+
+    throw new Error("No edited image or text explanation returned.");
+
   } catch (e: any) {
     console.error("Image Edit Failed", e);
-     if (e.message?.includes('403')) {
+    if (e.message?.includes('403')) {
         throw new Error("Permission Denied (403). Image editing model access restricted.");
     }
-    throw e;
+    throw e; 
   }
 };
 
-export const analyzeMedia = async (mediaBase64: string, mimeType: string, prompt: string): Promise<string> => {
+export const analyzeMedia = async (mediaBase64: string, mimeType: string, prompt: string, facts?: Fact[]): Promise<string> => {
   const ai = getAiClient();
   const cleanBase64 = mediaBase64.replace(/^data:.*;base64,/, "");
+  
+  const factsContext = facts 
+    ? facts.map(f => `FACT: ${f.title} - ${f.fullDetail}`).join('\n') 
+    : "No specific case facts provided.";
+
+  const fullPrompt = `
+    CONTEXT: You are analyzing forensic evidence for a legal case.
+    KNOWN FACTS: 
+    ${factsContext}
+
+    USER QUERY: ${prompt}
+    
+    Analyze the provided media closely. Flag any inconsistencies with the Known Facts.
+  `;
   
   // Using Gemini 3 Pro for deep understanding of Images and Video
   try {
@@ -226,11 +258,11 @@ export const analyzeMedia = async (mediaBase64: string, mimeType: string, prompt
                 data: cleanBase64
             }
             },
-            { text: prompt }
+            { text: fullPrompt }
         ]
         },
         config: {
-        systemInstruction: "You are a forensic analyst reviewing evidence. Be extremely detailed.",
+        systemInstruction: "You are a forensic analyst reviewing evidence. Be extremely detailed and compare against known case facts.",
         }
     });
     return response.text || "Analysis inconclusive.";
@@ -357,13 +389,23 @@ export const transcribeAudio = async (audioBase64: string): Promise<string> => {
 
 // --- VENUE INTELLIGENCE ---
 
-export const queryVenueIntelligence = async (prompt: string): Promise<{ text: string, mapChunks: any[] }> => {
+export const queryVenueIntelligence = async (prompt: string, facts: Fact[]): Promise<{ text: string, mapChunks: any[] }> => {
   const ai = getAiClient();
   
+  const factsContext = facts.map(f => `${f.title}: ${f.shortDesc}`).join('; ');
+  const enhancedPrompt = `
+    CONTEXT: The user is a Pro Se Defendant in a foreclosure case (Case 24-C-10-005521).
+    KNOWN FACTS: ${factsContext}
+    
+    USER QUERY: ${prompt}
+    
+    TASK: Use Google Maps to identify locations relevant to the User Query. If the user asks for "important locations", look for the Courthouse, Trustee's Office, and the Deutsche Bank Vault location if inferable.
+  `;
+
   try {
     const response = await ai.models.generateContent({
         model: 'gemini-2.5-flash',
-        contents: prompt,
+        contents: enhancedPrompt,
         config: {
         tools: [{ googleMaps: {} }],
         },
@@ -438,8 +480,16 @@ export const scoutForensicLeads = async (currentFacts: Fact[]): Promise<Proposed
     });
 
     let rawText = response.text || "[]";
-    // Clean up any markdown code blocks the model might output
-    rawText = rawText.replace(/```json/g, '').replace(/```/g, '').trim();
+    
+    // ROBUST PARSING:
+    // 1. Try to find JSON array brackets [ ... ] within the text
+    const jsonArrayMatch = rawText.match(/\[[\s\S]*\]/);
+    if (jsonArrayMatch) {
+        rawText = jsonArrayMatch[0];
+    } else {
+        // 2. Fallback: Clean up markdown if no clear array brackets found
+        rawText = rawText.replace(/```json/g, '').replace(/```/g, '').trim();
+    }
     
     const raw = JSON.parse(rawText);
     // Ensure type safety on return
@@ -455,7 +505,7 @@ export const scoutForensicLeads = async (currentFacts: Fact[]): Promise<Proposed
   }
 };
 
-// --- DOCUMENT ANALYSIS (SERIOUS) ---
+// --- DOCUMENT ANALYSIS & INTERROGATION ---
 
 export const analyzeLegalDocument = async (
   fileBase64: string,
@@ -538,3 +588,47 @@ export const analyzeLegalDocument = async (
     };
   }
 };
+
+export const chatWithDocument = async (
+    history: { role: string, content: string }[],
+    userMessage: string,
+    documentContext: { extractedText: string, summary: string },
+    facts: Fact[]
+  ): Promise<string> => {
+    const ai = getAiClient();
+    const factsContext = facts.map(f => `${f.title}`).join(', ');
+  
+    const systemInstruction = `
+      ${SYSTEM_INSTRUCTION}
+      
+      ### DOCUMENT INTERROGATION MODE
+      You are analyzing a specific legal document.
+      
+      DOCUMENT CONTEXT:
+      SUMMARY: ${documentContext.summary}
+      FULL TEXT: ${documentContext.extractedText.substring(0, 20000)}... (truncated if too long)
+      
+      KNOWN FACTS: ${factsContext}
+      
+      DIRECTIVES:
+      1. Answer questions specifically about this document's text and validity.
+      2. If the user gives a DIRECTIVE (e.g., "Draft a Motion to Strike this"), use the document text as the basis for the motion.
+      3. Always highlight anomalies or contradictions with the Known Facts.
+    `;
+  
+    const chat = ai.chats.create({
+      model: 'gemini-3-pro-preview',
+      config: {
+        systemInstruction: systemInstruction,
+      },
+      history: history.map(m => ({ role: m.role, parts: [{ text: m.content }] })),
+    });
+  
+    try {
+      const result = await chat.sendMessage({ message: userMessage });
+      return result.text || "No response.";
+    } catch (e: any) {
+      console.error("Document Chat Failed", e);
+      return "Error: Unable to interrogate document.";
+    }
+  };

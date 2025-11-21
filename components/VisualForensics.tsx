@@ -1,11 +1,17 @@
+
 import React, { useState, useRef } from 'react';
 import { generateExhibitImage, editEvidenceImage, generateReconstructionVideo, analyzeMedia, AspectRatio } from '../services/gemini';
 import { Image as ImageIcon, Wand2, Video, Upload, Download, Loader2, ScanSearch } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
+import { Fact } from '../types';
 
 type Mode = 'EXHIBIT' | 'EDITOR' | 'RECONSTRUCTION' | 'ANALYST';
 
-const VisualForensics: React.FC = () => {
+interface VisualForensicsProps {
+  facts: Fact[];
+}
+
+const VisualForensics: React.FC<VisualForensicsProps> = ({ facts }) => {
   const [mode, setMode] = useState<Mode>('EXHIBIT');
   const [prompt, setPrompt] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -64,7 +70,8 @@ const VisualForensics: React.FC = () => {
         setResultMedia(result);
       } else if (mode === 'ANALYST') {
         if (!uploadedFile) throw new Error("File required for analysis");
-        const analysis = await analyzeMedia(uploadedFile, mimeType, prompt || "Analyze this evidence in detail.");
+        // Inject facts into the analysis
+        const analysis = await analyzeMedia(uploadedFile, mimeType, prompt || "Analyze this evidence in detail.", facts);
         setAnalysisText(analysis);
       }
     } catch (error) {
@@ -196,7 +203,7 @@ const VisualForensics: React.FC = () => {
           {mode === 'ANALYST' && (
              <div className="space-y-4">
                 <div className="p-4 bg-purple-900/10 border border-purple-900/30 rounded-lg text-xs text-purple-300">
-                 <strong>Goal:</strong> Automated analysis of evidence (Images or Video).
+                 <strong>Goal:</strong> Automated analysis of evidence (Images or Video) against <strong>Known Facts</strong>.
                  <br/><em>Model: Gemini 3 Pro</em>
                </div>
                <div 

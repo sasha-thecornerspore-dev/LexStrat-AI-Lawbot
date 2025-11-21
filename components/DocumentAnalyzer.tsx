@@ -1,8 +1,9 @@
 
-import React, { useState, useRef } from 'react';
-import { Fact, Annotation, AnalysisResult } from '../types';
-import { analyzeLegalDocument } from '../services/gemini';
-import { Upload, FileText, AlertTriangle, Check, ArrowRight, ScanLine, Loader2, ZoomIn, AlertCircle, Eye, AlignLeft } from 'lucide-react';
+import React, { useState, useRef, useEffect } from 'react';
+import { Fact, Annotation, AnalysisResult, Message } from '../types';
+import { analyzeLegalDocument, chatWithDocument } from '../services/gemini';
+import { Upload, FileText, AlertTriangle, Check, ArrowRight, ScanLine, Loader2, ZoomIn, AlertCircle, Eye, AlignLeft, MessageSquare, Send, Bot, User } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
 
 interface DocumentAnalyzerProps {
   facts: Fact[];
@@ -18,6 +19,12 @@ const DocumentAnalyzer: React.FC<DocumentAnalyzerProps> = ({ facts, onAddFact, e
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [activeTab, setActiveTab] = useState<'REPORT' | 'RAW_TEXT'>('REPORT');
   
+  // Chat State
+  const [chatMessages, setChatMessages] = useState<Message[]>([]);
+  const [chatInput, setChatInput] = useState('');
+  const [isChatting, setIsChatting] = useState(false);
+  const chatScrollRef = useRef<HTMLDivElement>(null);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -28,6 +35,7 @@ const DocumentAnalyzer: React.FC<DocumentAnalyzerProps> = ({ facts, onAddFact, e
       reader.onload = () => setFilePreview(reader.result as string);
       reader.readAsDataURL(selectedFile);
       setResult(null); // Reset previous results
+      setChatMessages([]); // Reset chat
       setActiveTab('REPORT');
     }
   };
@@ -42,6 +50,13 @@ const DocumentAnalyzer: React.FC<DocumentAnalyzerProps> = ({ facts, onAddFact, e
         facts
       );
       setResult(analysis);
+      // Init Chat
+      setChatMessages([{
+        id: 'init',
+        role: 'model',
+        content: `**Analysis Complete.** I have extracted the text and flagged ${analysis.discrepancies.length} discrepancies. \n\nYou may now issue directives (e.g., "Draft a Motion to Strike this", "Summarize the perjury") or ask questions about specific paragraphs.`,
+        timestamp: new Date()
+      }]);
     } catch (e) {
       console.error("Analysis failed", e);
     } finally {
@@ -49,8 +64,47 @@ const DocumentAnalyzer: React.FC<DocumentAnalyzerProps> = ({ facts, onAddFact, e
     }
   };
 
+  const handleChatSend = async () => {
+    if (!chatInput.trim() || !result) return;
+    const userMsg: Message = {
+      id: Date.now().toString(),
+      role: 'user',
+      content: chatInput,
+      timestamp: new Date()
+    };
+    setChatMessages(prev => [...prev, userMsg]);
+    setChatInput('');
+    setIsChatting(true);
+
+    try {
+       const history = chatMessages.map(m => ({ role: m.role, content: m.content }));
+       const responseText = await chatWithDocument(
+           history, 
+           userMsg.content, 
+           { extractedText: result.extractedText || "", summary: result.summary },
+           facts
+       );
+       
+       setChatMessages(prev => [...prev, {
+           id: (Date.now()+1).toString(),
+           role: 'model',
+           content: responseText,
+           timestamp: new Date()
+       }]);
+    } catch (e) {
+        console.error(e);
+    } finally {
+        setIsChatting(false);
+    }
+  };
+
+  useEffect(() => {
+    if (chatScrollRef.current) {
+        chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
+    }
+  }, [chatMessages]);
+
   const promoteDiscrepancy = (d: any) => {
-    // Create a new Fact based on the discrepancy
     const newFact: Fact = {
       id: Date.now().toString(),
       title: "Verified Perjury: " + d.issue.substring(0, 20) + "...",
@@ -61,7 +115,6 @@ const DocumentAnalyzer: React.FC<DocumentAnalyzerProps> = ({ facts, onAddFact, e
       severity: d.severity === "POSSIBLE_PERJURY" ? "FATAL" : "CRITICAL"
     };
     onAddFact(newFact);
-    // Visual feedback could be added here
     alert("Discrepancy added to Evidence Vault.");
   };
 
@@ -92,7 +145,6 @@ const DocumentAnalyzer: React.FC<DocumentAnalyzerProps> = ({ facts, onAddFact, e
                 </div>
               )}
               
-              {/* Scanner Overlay Effect */}
               {isAnalyzing && (
                 <div className="absolute inset-0 bg-purple-900/10 z-10">
                   <div className="w-full h-1 bg-purple-500/50 shadow-[0_0_15px_rgba(168,85,247,0.8)] animate-[scan_2s_ease-in-out_infinite]"></div>
@@ -120,7 +172,6 @@ const DocumentAnalyzer: React.FC<DocumentAnalyzerProps> = ({ facts, onAddFact, e
             accept="application/pdf,image/*"
           />
 
-          {/* Action Bar */}
           {file && (
             <div className="p-4 bg-slate-900 border-t border-slate-800 flex justify-between items-center">
               <button 
@@ -142,27 +193,29 @@ const DocumentAnalyzer: React.FC<DocumentAnalyzerProps> = ({ facts, onAddFact, e
         </div>
       </div>
 
-      {/* Right Panel: Forensic Report */}
-      <div className="w-1/2 bg-slate-950 flex flex-col">
-         {/* Result Tabs */}
+      {/* Right Panel: Split View (Report + Chat) */}
+      <div className="w-1/2 bg-slate-950 flex flex-col border-l border-slate-800">
+         
+         {/* Tabs */}
          {result && (
-           <div className="flex border-b border-slate-800 bg-slate-900">
+           <div className="flex border-b border-slate-800 bg-slate-900 flex-shrink-0">
               <button 
                 onClick={() => setActiveTab('REPORT')}
                 className={`flex-1 py-3 text-xs font-bold uppercase flex items-center justify-center gap-2 ${activeTab === 'REPORT' ? 'text-purple-400 border-b-2 border-purple-400 bg-slate-800' : 'text-slate-500 hover:text-slate-300'}`}
               >
-                <Eye className="w-4 h-4" /> Forensic Report
+                <Eye className="w-4 h-4" /> Report
               </button>
               <button 
                 onClick={() => setActiveTab('RAW_TEXT')}
                 className={`flex-1 py-3 text-xs font-bold uppercase flex items-center justify-center gap-2 ${activeTab === 'RAW_TEXT' ? 'text-blue-400 border-b-2 border-blue-400 bg-slate-800' : 'text-slate-500 hover:text-slate-300'}`}
               >
-                <AlignLeft className="w-4 h-4" /> Raw Text (OCR)
+                <AlignLeft className="w-4 h-4" /> Raw Text
               </button>
            </div>
          )}
 
-        <div className="flex-1 p-8 overflow-y-auto">
+         {/* Content Area (Top Half) */}
+        <div className="flex-1 overflow-y-auto p-6 border-b border-slate-800">
           {!result ? (
             <div className="h-full flex flex-col items-center justify-center opacity-30">
               <AlertTriangle className="w-24 h-24 mb-6 text-slate-500" />
@@ -205,16 +258,13 @@ const DocumentAnalyzer: React.FC<DocumentAnalyzerProps> = ({ facts, onAddFact, e
                               <Check className="w-3 h-3" /> Add to Vault
                             </button>
                           </div>
-                          
                           <div className="mb-3 pl-3 border-l-2 border-slate-700">
                             <p className="text-xs text-slate-500 italic mb-1">" {item.quote} "</p>
                           </div>
-                          
                           <div className="flex items-start gap-2 text-sm text-white">
                             <ArrowRight className="w-4 h-4 text-red-500 mt-1 flex-shrink-0" />
                             <p>{item.issue}</p>
                           </div>
-                          
                           <p className="mt-3 text-[10px] text-slate-500 uppercase font-bold">
                             Rebutted By: <span className="text-blue-400">{item.rebuttalRef}</span>
                           </p>
@@ -222,12 +272,9 @@ const DocumentAnalyzer: React.FC<DocumentAnalyzerProps> = ({ facts, onAddFact, e
                       ))}
                     </div>
                   </div>
-
                   <div className="p-4 bg-blue-900/10 border border-blue-900/30 rounded-lg mt-6">
                     <h3 className="text-blue-400 text-xs font-bold uppercase mb-2">Recommended Action</h3>
-                    <p className="text-slate-300 text-sm italic">
-                      {result.recommendedAction}
-                    </p>
+                    <p className="text-slate-300 text-sm italic">{result.recommendedAction}</p>
                   </div>
                 </div>
               ) : (
@@ -251,6 +298,62 @@ const DocumentAnalyzer: React.FC<DocumentAnalyzerProps> = ({ facts, onAddFact, e
             </>
           )}
         </div>
+
+        {/* Chat Interface (Bottom Half) */}
+        {result && (
+            <div className="h-[40%] flex flex-col bg-slate-900 border-t border-slate-800">
+                <div className="px-4 py-2 bg-slate-950 border-b border-slate-800 flex items-center gap-2">
+                    <MessageSquare className="w-4 h-4 text-purple-400" />
+                    <span className="text-xs font-bold text-slate-400 uppercase">Analyst Directive Channel</span>
+                </div>
+                
+                <div ref={chatScrollRef} className="flex-1 overflow-y-auto p-4 space-y-4">
+                    {chatMessages.map(msg => (
+                        <div key={msg.id} className={`flex gap-3 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
+                            <div className={`w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 ${msg.role === 'user' ? 'bg-slate-800' : 'bg-purple-900/30'}`}>
+                                {msg.role === 'user' ? <User className="w-3 h-3 text-slate-400" /> : <Bot className="w-4 h-4 text-purple-400" />}
+                            </div>
+                            <div className={`rounded-lg p-3 text-xs max-w-[85%] ${msg.role === 'user' ? 'bg-slate-800 text-white' : 'bg-slate-950 border border-slate-800 text-slate-300'}`}>
+                                <ReactMarkdown>{msg.content}</ReactMarkdown>
+                            </div>
+                        </div>
+                    ))}
+                    {isChatting && (
+                         <div className="flex gap-3">
+                            <div className="w-6 h-6 rounded-full bg-purple-900/30 flex items-center justify-center flex-shrink-0">
+                                <Bot className="w-4 h-4 text-purple-400" />
+                            </div>
+                            <div className="bg-slate-950 border border-slate-800 rounded-lg p-3 flex items-center gap-1">
+                                <div className="w-1.5 h-1.5 bg-purple-500 rounded-full animate-bounce"></div>
+                                <div className="w-1.5 h-1.5 bg-purple-500 rounded-full animate-bounce" style={{animationDelay: '0.1s'}}></div>
+                                <div className="w-1.5 h-1.5 bg-purple-500 rounded-full animate-bounce" style={{animationDelay: '0.2s'}}></div>
+                            </div>
+                         </div>
+                    )}
+                </div>
+
+                <div className="p-3 bg-slate-950">
+                    <div className="relative">
+                        <input 
+                            type="text" 
+                            value={chatInput}
+                            onChange={(e) => setChatInput(e.target.value)}
+                            onKeyDown={(e) => e.key === 'Enter' && handleChatSend()}
+                            placeholder="Issue directive (e.g., 'Draft a Motion to Strike this affidavit')..."
+                            className="w-full bg-slate-900 border border-slate-700 rounded-lg pl-3 pr-10 py-2 text-xs text-white focus:border-purple-500 focus:outline-none"
+                            disabled={isChatting}
+                        />
+                        <button 
+                            onClick={handleChatSend}
+                            disabled={isChatting || !chatInput.trim()}
+                            className="absolute right-1 top-1 p-1.5 text-slate-400 hover:text-purple-500"
+                        >
+                            <Send className="w-4 h-4" />
+                        </button>
+                    </div>
+                </div>
+            </div>
+        )}
       </div>
     </div>
   );

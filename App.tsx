@@ -71,9 +71,11 @@ const App: React.FC = () => {
       case View.LIVE_WAR_ROOM:
         return <LiveWarRoom />;
       case View.VISUAL_FORENSICS:
-        return <VisualForensics />;
+        // Passed facts to enable context-aware analysis
+        return <VisualForensics facts={facts} />;
       case View.VENUE_RECON:
-        return <VenueRecon />;
+        // Passed facts to enable context-aware mapping
+        return <VenueRecon facts={facts} />;
       case View.DOC_ANALYZER:
         return (
           <DocumentAnalyzer 

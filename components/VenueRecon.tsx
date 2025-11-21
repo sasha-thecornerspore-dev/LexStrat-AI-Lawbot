@@ -1,14 +1,20 @@
+
 import React, { useState } from 'react';
 import { queryVenueIntelligence } from '../services/gemini';
 import { Map, Search, Navigation, MapPin } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
+import { Fact } from '../types';
 
 interface MapChunk {
   web?: { uri: string; title: string };
   maps?: { uri: string; title: string; placeAnswerSources?: any };
 }
 
-const VenueRecon: React.FC = () => {
+interface VenueReconProps {
+  facts: Fact[];
+}
+
+const VenueRecon: React.FC<VenueReconProps> = ({ facts }) => {
   const [query, setQuery] = useState('');
   const [response, setResponse] = useState('');
   const [mapData, setMapData] = useState<MapChunk[]>([]);
@@ -21,7 +27,8 @@ const VenueRecon: React.FC = () => {
     setMapData([]);
 
     try {
-      const result = await queryVenueIntelligence(query);
+      // Pass facts to provide case context
+      const result = await queryVenueIntelligence(query, facts);
       setResponse(result.text);
       setMapData(result.mapChunks);
     } catch (error) {
@@ -50,7 +57,7 @@ const VenueRecon: React.FC = () => {
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-                  placeholder="E.g., 'Distance between Substitute Trustee office and Courthouse?'"
+                  placeholder="E.g., 'Distance between Substitute Trustee and Courthouse?'"
                   className="w-full bg-slate-950 border border-slate-700 rounded-lg py-3 pl-4 pr-12 text-white focus:border-green-500 focus:outline-none"
                 />
                 <button 
@@ -61,6 +68,9 @@ const VenueRecon: React.FC = () => {
                   <Search className="w-4 h-4" />
                 </button>
              </div>
+             <p className="text-[10px] text-slate-600 mt-2">
+               Context Active: {facts.length} known case facts injected into query.
+             </p>
            </div>
 
            <div className="p-4 bg-slate-950 rounded-lg border border-slate-800 h-full overflow-y-auto">
