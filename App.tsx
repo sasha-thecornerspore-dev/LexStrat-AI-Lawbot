@@ -10,7 +10,6 @@ import LiveWarRoom from './components/LiveWarRoom';
 import VisualForensics from './components/VisualForensics';
 import VenueRecon from './components/VenueRecon';
 import DocumentAnalyzer from './components/DocumentAnalyzer';
-import CaseGraph from './components/CaseGraph';
 import { View, Fact, Annotation } from './types';
 import { STRATEGIC_INTEL } from './constants';
 
@@ -18,17 +17,33 @@ const App: React.FC = () => {
   const [currentView, setCurrentView] = useState<View>(View.DASHBOARD);
   const [driveUrl, setDriveUrl] = useState<string>('');
   
-  // Lifted State for Evidence Repository
-  const [facts, setFacts] = useState<Fact[]>(STRATEGIC_INTEL);
-  const [evidenceMap, setEvidenceMap] = useState<Record<string, Annotation[]>>({});
+  // Lifted State for Evidence Repository with Persistence
+  const [facts, setFacts] = useState<Fact[]>(() => {
+    const saved = localStorage.getItem('lexstrat_facts');
+    return saved ? JSON.parse(saved) : STRATEGIC_INTEL;
+  });
+  
+  const [evidenceMap, setEvidenceMap] = useState<Record<string, Annotation[]>>(() => {
+    const saved = localStorage.getItem('lexstrat_evidence');
+    return saved ? JSON.parse(saved) : {};
+  });
 
-  // Initialize from local storage on mount
+  // Initialize settings from local storage on mount
   useEffect(() => {
     const savedUrl = localStorage.getItem('lexstrat_drive_url');
     if (savedUrl) {
       setDriveUrl(savedUrl);
     }
   }, []);
+
+  // Persistence Effects
+  useEffect(() => {
+    localStorage.setItem('lexstrat_facts', JSON.stringify(facts));
+  }, [facts]);
+
+  useEffect(() => {
+    localStorage.setItem('lexstrat_evidence', JSON.stringify(evidenceMap));
+  }, [evidenceMap]);
 
   const handleUpdateDriveUrl = (url: string) => {
     setDriveUrl(url);
@@ -85,8 +100,6 @@ const App: React.FC = () => {
              onUpdateEvidenceMap={handleUpdateEvidenceMap}
           />
         );
-      // case View.INTELLIGENCE_GRAPH: // Assuming CaseGraph is linked here if added to View enum
-      //   return <CaseGraph />;
       default:
         return <Dashboard />;
     }

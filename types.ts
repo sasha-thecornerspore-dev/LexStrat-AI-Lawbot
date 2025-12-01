@@ -104,7 +104,13 @@ export interface FileIndexItem {
 }
 
 declare global {
+  interface AIStudio {
+    hasSelectedApiKey: () => Promise<boolean>;
+    openSelectKey: () => Promise<void>;
+  }
+
   interface Window {
     webkitAudioContext: typeof AudioContext;
+    aistudio?: AIStudio;
   }
 }

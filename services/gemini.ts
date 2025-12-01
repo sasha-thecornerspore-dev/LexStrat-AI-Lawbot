@@ -491,12 +491,21 @@ export const scoutForensicLeads = async (currentFacts: Fact[]): Promise<Proposed
         rawText = rawText.replace(/```json/g, '').replace(/```/g, '').trim();
     }
     
-    const raw = JSON.parse(rawText);
-    // Ensure type safety on return
-    return raw.map((item: any) => ({
-      ...item,
-      id: item.id || Date.now().toString() + Math.random(),
-    }));
+    try {
+      const raw = JSON.parse(rawText);
+      if (Array.isArray(raw)) {
+        return raw.map((item: any) => ({
+          ...item,
+          id: item.id || Date.now().toString() + Math.random(),
+        }));
+      } else {
+        console.warn("Scout returned non-array JSON:", raw);
+        return [];
+      }
+    } catch (parseError) {
+      console.error("Failed to parse JSON from Scout", rawText);
+      return [];
+    }
 
   } catch (e: any) {
     console.error("Scout parsing failed or Permission Denied", e);

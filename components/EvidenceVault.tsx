@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import { Fact, ProposedLead, Annotation } from '../types';
 import { scoutForensicLeads } from '../services/gemini';
-import { FileWarning, Truck, Network, Scale, Gavel, LucideIcon, FileSearch, Plus, Paperclip, FileText, ExternalLink, Loader2, Sparkles, Check, X, AlertCircle } from 'lucide-react';
+import { FileWarning, Truck, Network, Scale, Gavel, LucideIcon, AlertCircle, ExternalLink, Loader2, Sparkles, Check, X, Plus, Paperclip, FileText } from 'lucide-react';
 
 const iconMap: Record<string, LucideIcon> = {
   FileWarning,
@@ -48,18 +48,29 @@ const EvidenceVault: React.FC<EvidenceVaultProps> = ({ driveUrl, facts, onAddFac
   const handleFileUpload = (factId: string, e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+
+    // Limit size to 2MB for LocalStorage persistence in this demo
+    if (file.size > 2 * 1024 * 1024) {
+        alert("File too large for local storage (Max 2MB). Please use a linked Drive for large files.");
+        return;
+    }
     
-    const newFile: Annotation = {
-      id: Date.now().toString(),
-      type: 'FILE',
-      content: URL.createObjectURL(file), // Mock URL for demo
-      name: file.name,
-      date: new Date()
+    const reader = new FileReader();
+    reader.onloadend = () => {
+        const base64Content = reader.result as string;
+        const newFile: Annotation = {
+            id: Date.now().toString(),
+            type: 'FILE',
+            content: base64Content,
+            name: file.name,
+            date: new Date()
+        };
+        onUpdateEvidenceMap({
+            ...evidenceMap,
+            [factId]: [...(evidenceMap[factId] || []), newFile]
+        });
     };
-    onUpdateEvidenceMap({
-      ...evidenceMap,
-      [factId]: [...(evidenceMap[factId] || []), newFile]
-    });
+    reader.readAsDataURL(file);
   };
 
   const startScouting = async () => {
@@ -88,10 +99,6 @@ const EvidenceVault: React.FC<EvidenceVaultProps> = ({ driveUrl, facts, onAddFac
       onAddFact(newFact);
     } else if (lead.type === 'SUPPORTING_DOC') {
       // Add as file annotation to the first relevant fact (simplified logic)
-      // In a real app, AI would suggest WHICH fact it belongs to.
-      // For now, we attach it to the most recent fact or create a generic one?
-      // Better: Create a generic "Research" fact if none exists, or just alert user.
-      // Actually, let's add it as a Note to the first fact for now to demonstrate capability.
       if (facts.length > 0) {
          const targetFactId = facts[0].id;
          const newNote: Annotation = {
@@ -212,22 +219,22 @@ const EvidenceVault: React.FC<EvidenceVaultProps> = ({ driveUrl, facts, onAddFac
                 {/* Annotation Area */}
                 <div className="mt-auto border-t border-slate-800 pt-4">
                    <h4 className="text-xs font-bold text-slate-500 uppercase mb-3 flex items-center gap-2">
-                     Supporting Documentation
+                     Supporting Documentation & Notes
                      <span className="bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded-full text-[10px]">{annotations.length}</span>
                    </h4>
                    
                    <div className="space-y-2 mb-4">
-                     {annotations.length === 0 && <p className="text-slate-600 text-xs italic">No supporting documents attached yet.</p>}
+                     {annotations.length === 0 && <p className="text-slate-600 text-xs italic">No supporting documents or notes attached yet.</p>}
                      {annotations.map((note) => (
                        <div key={note.id} className="flex items-start gap-2 bg-slate-950/50 p-2 rounded border border-slate-800">
                           {note.type === 'FILE' ? <Paperclip className="w-3 h-3 text-blue-400 mt-1" /> : <FileText className="w-3 h-3 text-amber-400 mt-1" />}
-                          <div className="text-xs text-slate-300 break-all">
+                          <div className="text-xs text-slate-300 break-all flex-1">
                             {note.type === 'FILE' ? (
                               <a href={note.content} target="_blank" rel="noreferrer" className="font-bold text-blue-400 underline cursor-pointer hover:text-blue-300">{note.name}</a>
                             ) : (
                               <span>{note.content}</span>
                             )}
-                            <div className="text-[10px] text-slate-600 mt-0.5">{note.date.toLocaleDateString()}</div>
+                            <div className="text-[10px] text-slate-600 mt-0.5">{new Date(note.date).toLocaleDateString()} {new Date(note.date).toLocaleTimeString()}</div>
                           </div>
                        </div>
                      ))}
@@ -249,7 +256,7 @@ const EvidenceVault: React.FC<EvidenceVaultProps> = ({ driveUrl, facts, onAddFac
                             onClick={() => handleAddNote(fact.id)}
                             className="bg-amber-600 text-white px-3 py-1 rounded text-xs font-bold hover:bg-amber-500"
                          >
-                           Add Note
+                           Save Note
                          </button>
                          <button 
                             onClick={() => setActiveInput(null)}
